@@ -115,23 +115,7 @@ func (c *LintCommands) formatCheck(ctx context.Context, params map[string]any) (
 
 	var unformatted []string
 
-	err := filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Skip directories and non-Go files
-		if info.IsDir() {
-			if strings.HasPrefix(info.Name(), ".") || info.Name() == "vendor" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		if !strings.HasSuffix(filePath, ".go") {
-			return nil
-		}
-
+	err := walkGoFiles(path, func(filePath string, info os.FileInfo) error {
 		// Read and check formatting
 		content, err := os.ReadFile(filePath)
 		if err != nil {
@@ -179,23 +163,7 @@ func (c *LintCommands) formatFix(ctx context.Context, params map[string]any) (en
 	var fixed []string
 	var errors []string
 
-	err := filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Skip directories and non-Go files
-		if info.IsDir() {
-			if strings.HasPrefix(info.Name(), ".") || info.Name() == "vendor" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		if !strings.HasSuffix(filePath, ".go") {
-			return nil
-		}
-
+	err := walkGoFiles(path, func(filePath string, info os.FileInfo) error {
 		// Parse and format
 		fset := token.NewFileSet()
 		node, err := parser.ParseFile(fset, filePath, nil, parser.ParseComments)
@@ -255,4 +223,29 @@ func (c *LintCommands) formatFix(ctx context.Context, params map[string]any) (en
 		"fixed":       fixed,
 		"errors":      errors,
 	}), nil
+}
+
+// walkGoFiles walks the directory tree and calls fn for each .go file,
+// skipping hidden directories and vendor.
+func walkGoFiles(root string, fn func(path string, info os.FileInfo) error) error {
+	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip hidden directories and vendor
+		if info.IsDir() {
+			if strings.HasPrefix(info.Name(), ".") || info.Name() == "vendor" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Skip non-Go files
+		if !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+
+		return fn(path, info)
+	})
 }
