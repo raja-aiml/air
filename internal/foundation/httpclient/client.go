@@ -46,6 +46,14 @@ func (c *Client) CheckEndpoint(ctx context.Context, url string) bool {
 	return resp.StatusCode >= 200 && resp.StatusCode < 300
 }
 
+// checkStatus validates HTTP response status code is 2xx.
+func (c *Client) checkStatus(resp *http.Response) error {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("unexpected status: %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // GetJSON performs a GET request and unmarshals the response into result.
 func (c *Client) GetJSON(ctx context.Context, url string, result any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -59,8 +67,8 @@ func (c *Client) GetJSON(ctx context.Context, url string, result any) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("unexpected status: %d", resp.StatusCode)
+	if err := c.checkStatus(resp); err != nil {
+		return err
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -88,8 +96,8 @@ func (c *Client) Get(ctx context.Context, url string) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("unexpected status: %d", resp.StatusCode)
+	if err := c.checkStatus(resp); err != nil {
+		return nil, err
 	}
 
 	body, err := io.ReadAll(resp.Body)

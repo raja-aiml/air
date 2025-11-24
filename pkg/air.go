@@ -4,6 +4,7 @@ package air
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"time"
 
@@ -403,3 +404,14 @@ var (
 	NewGitHubPublisher = ghpub.NewPublisher
 	PublishToGitHub    = ghpub.Publish
 )
+
+// PublishRepo is a convenience wrapper that runs the full publish workflow
+// using the provided options and prints high-level progress messages.
+func PublishRepo(opts PublishOptions) error {
+	fmt.Println("🚀 Publishing repository to GitHub...")
+	if err := PublishToGitHub(opts); err != nil {
+		return err
+	}
+	fmt.Println("✅ Publish workflow completed")
+	return nil
+}

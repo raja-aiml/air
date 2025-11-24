@@ -1,0 +1,76 @@
+name: skill-flow
+
+services:
+  postgres:
+    container_name: postgres
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: skillflow
+      POSTGRES_PASSWORD: skillflow
+      POSTGRES_DB: skillflow
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U skillflow"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - skillflow
+    labels:
+      service.name: postgres
+      service.type: database
+
+  jaeger:
+    container_name: jaeger
+    image: jaegertracing/all-in-one:latest
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+      SPAN_STORAGE_TYPE: memory
+    ports:
+      - "16686:16686"
+      - "14250:14250"
+    networks:
+      - skillflow
+    labels:
+      service.name: jaeger
+      service.type: tracing
+
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    networks:
+      - skillflow
+    labels:
+      service.name: prometheus
+      service.type: metrics
+
+  otel-collector:
+    container_name: otel-collector
+    image: otel/opentelemetry-collector-contrib:latest
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "8889:8889"
+      - "13133:13133"
+      - "24224:24224"
+    depends_on:
+      - jaeger
+      - prometheus
+    networks:
+      - skillflow
+    labels:
+      service.name: otel-collector
+      service.type: telemetry
+
+volumes:
+  db_data:
+  prometheus_data:
+
+networks:
+  skillflow:
+    driver: bridge

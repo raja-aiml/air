@@ -20,6 +20,70 @@ import (
 	"github.com/docker/go-connections/nat"
 )
 
+const (
+	// containerStopTimeoutSeconds is the timeout in seconds for graceful container shutdown
+	containerStopTimeoutSeconds = 10
+
+	// containerRemoveRetryAttempts is the number of retry attempts for container removal
+	containerRemoveRetryAttempts = 3
+
+	// networkRemoveRetryAttempts is the number of retry attempts for network removal
+	networkRemoveRetryAttempts = 3
+
+	// retryDelayMilliseconds is the delay between retry attempts
+	retryDelayMilliseconds = 500
+
+	// containerStateSettleDelayMilliseconds is the wait time for container state to settle after stop
+	containerStateSettleDelayMilliseconds = 200
+
+	// logTailLines is the number of log lines to retrieve
+	logTailLines = "100"
+
+	// healthCheckPollInterval is the interval for polling service health
+	healthCheckPollInterval = 2 * time.Second
+
+	// dockerPingTimeout is the timeout for Docker daemon ping
+	dockerPingTimeout = 5 * time.Second
+
+	// cleanupTimeout is the timeout for cleanup operations
+	cleanupTimeout = 30 * time.Second
+)
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+// retryOperation executes an operation with retry logic and context awareness.
+// It attempts the operation up to maxAttempts times, with retryDelay between attempts.
+func retryOperation(ctx context.Context, maxAttempts int, retryDelay time.Duration, operation func() error) error {
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		// Check context before each attempt
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("context cancelled: %w", err)
+		}
+
+		if err := operation(); err != nil {
+			lastErr = err
+			// If not the last attempt, wait before retrying
+			if attempt < maxAttempts-1 {
+				select {
+				case <-ctx.Done():
+					return fmt.Errorf("context cancelled during retry: %w", ctx.Err())
+				case <-time.After(retryDelay):
+				}
+			}
+		} else {
+			return nil // Success
+		}
+	}
+	return lastErr
+}
+
+// ============================================================================
+// TYPES & CONSTRUCTORS
+// ============================================================================
+
 // Service represents a Docker Compose stack managed via Docker SDK
 type Service struct {
 	cli         *client.Client
@@ -70,7 +134,7 @@ func New(cfg Config) (*Service, error) {
 	}
 
 	// Verify Docker daemon is reachable
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), dockerPingTimeout)
 	defer cancel()
 
 	if _, err := cli.Ping(ctx); err != nil {
@@ -105,6 +169,10 @@ func New(cfg Config) (*Service, error) {
 	}, nil
 }
 
+// ============================================================================
+// SERVICE LIFECYCLE - START OPERATIONS
+// ============================================================================
+
 // Start brings up all compose services using Docker SDK
 func (s *Service) Start(ctx context.Context) error {
 	var startErr error
@@ -112,7 +180,7 @@ func (s *Service) Start(ctx context.Context) error {
 	// Cleanup on failure - rollback any partially created resources
 	cleanup := func() {
 		if startErr != nil {
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
 			defer cancel()
 			_ = s.Stop(cleanupCtx)
 		}
@@ -414,6 +482,10 @@ func (s *Service) startService(ctx context.Context, svc composetypes.ServiceConf
 	return nil
 }
 
+// ============================================================================
+// SERVICE LIFECYCLE - STOP OPERATIONS
+// ============================================================================
+
 // Stop brings down all compose services
 func (s *Service) Stop(ctx context.Context) error {
 	// Phase 1: Stop and remove all containers (with retry logic)
@@ -450,7 +522,7 @@ func (s *Service) stopContainers(ctx context.Context) error {
 	}
 
 	var lastErr error
-	timeout := 10
+	timeout := containerStopTimeoutSeconds
 
 	for _, c := range containers {
 		// Check context cancellation before processing each container
@@ -477,39 +549,18 @@ func (s *Service) stopContainers(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("context cancelled during container cleanup: %w", ctx.Err())
-		case <-time.After(200 * time.Millisecond):
+		case <-time.After(containerStateSettleDelayMilliseconds * time.Millisecond):
 		}
 
 		// Step 3: Remove container with retry
-		removed := false
-		for attempt := 0; attempt < 3; attempt++ {
-			// Check context before each retry
-			if err := ctx.Err(); err != nil {
-				return fmt.Errorf("context cancelled during container removal: %w", err)
-			}
-
-			if err := s.cli.ContainerRemove(ctx, c.ID, container.RemoveOptions{
+		if err := retryOperation(ctx, containerRemoveRetryAttempts, retryDelayMilliseconds*time.Millisecond, func() error {
+			return s.cli.ContainerRemove(ctx, c.ID, container.RemoveOptions{
 				Force:         true,
 				RemoveVolumes: true,
-			}); err != nil {
-				if attempt < 2 {
-					select {
-					case <-ctx.Done():
-						return fmt.Errorf("context cancelled during container removal: %w", ctx.Err())
-					case <-time.After(500 * time.Millisecond):
-					}
-					continue
-				}
-				lastErr = fmt.Errorf("remove container %s: %w", containerName, err)
-				fmt.Printf("Warning: failed to remove container %s after retries: %v\n", containerName, err)
-			} else {
-				removed = true
-				break
-			}
-		}
-
-		if !removed && lastErr == nil {
-			lastErr = fmt.Errorf("failed to remove container %s", containerName)
+			})
+		}); err != nil {
+			lastErr = fmt.Errorf("remove container %s: %w", containerName, err)
+			fmt.Printf("Warning: failed to remove container %s after retries: %v\n", containerName, err)
 		}
 	}
 
@@ -536,30 +587,12 @@ func (s *Service) removeNetworks(ctx context.Context) error {
 		}
 
 		// Retry network removal (may need time for container detachment)
-		removed := false
-		for attempt := 0; attempt < 3; attempt++ {
-			// Check context before each retry
-			if err := ctx.Err(); err != nil {
-				return fmt.Errorf("context cancelled during network removal: %w", err)
-			}
-
-			if err := s.cli.NetworkRemove(ctx, n.ID); err != nil {
-				if attempt < 2 {
-					select {
-					case <-ctx.Done():
-						return fmt.Errorf("context cancelled during network removal: %w", ctx.Err())
-					case <-time.After(500 * time.Millisecond):
-					}
-					continue
-				}
-				lastErr = fmt.Errorf("remove network %s: %w", n.Name, err)
-				fmt.Printf("Warning: failed to remove network %s: %v\n", n.Name, err)
-			} else {
-				removed = true
-				break
-			}
-		}
-		if removed {
+		if err := retryOperation(ctx, networkRemoveRetryAttempts, retryDelayMilliseconds*time.Millisecond, func() error {
+			return s.cli.NetworkRemove(ctx, n.ID)
+		}); err != nil {
+			lastErr = fmt.Errorf("remove network %s: %w", n.Name, err)
+			fmt.Printf("Warning: failed to remove network %s: %v\n", n.Name, err)
+		} else {
 			// Also remove from in-memory map if present
 			for name, id := range s.networkIDs {
 				if id == n.ID {
@@ -587,6 +620,11 @@ func (s *Service) removeVolumes(ctx context.Context) error {
 
 	var lastErr error
 	for _, v := range volumes.Volumes {
+		// Check context cancellation before processing each volume
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("context cancelled during volume cleanup: %w", err)
+		}
+
 		if err := s.cli.VolumeRemove(ctx, v.Name, true); err != nil {
 			lastErr = fmt.Errorf("remove volume %s: %w", v.Name, err)
 			fmt.Printf("Warning: failed to remove volume %s: %v\n", v.Name, err)
@@ -598,6 +636,10 @@ func (s *Service) removeVolumes(ctx context.Context) error {
 
 	return lastErr
 }
+
+// ============================================================================
+// SERVICE INSPECTION & MONITORING
+// ============================================================================
 
 // Status retrieves current status of all services
 func (s *Service) Status(ctx context.Context) (*ServiceStatus, error) {
@@ -678,7 +720,7 @@ func (s *Service) Logs(ctx context.Context, serviceName string) (string, error) 
 	reader, err := s.cli.ContainerLogs(ctx, containers[0].ID, container.LogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
-		Tail:       "100",
+		Tail:       logTailLines,
 	})
 	if err != nil {
 		return "", fmt.Errorf("get logs: %w", err)
@@ -732,12 +774,16 @@ func (s *Service) WaitForHealthy(ctx context.Context, timeout time.Duration) err
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("context cancelled while waiting for services: %w", ctx.Err())
-		case <-time.After(2 * time.Second):
+		case <-time.After(healthCheckPollInterval):
 		}
 	}
 
 	return fmt.Errorf("timeout waiting for services to be healthy")
 }
+
+// ============================================================================
+// UTILITY METHODS
+// ============================================================================
 
 // Close closes the Docker client connection
 func (s *Service) Close() error {
@@ -759,7 +805,9 @@ func (s *Service) GetClient() *client.Client {
 	return s.cli
 }
 
-// Helper functions
+// ============================================================================
+// PRIVATE HELPER FUNCTIONS
+// ============================================================================
 
 func buildEnvList(envMap composetypes.MappingWithEquals) []string {
 	result := make([]string, 0, len(envMap))

@@ -78,32 +78,33 @@ func (c *DBCommands) Register(r *engine.Registry) {
 	})
 }
 
-func (c *DBCommands) migrate(ctx context.Context, params map[string]any) (engine.Result, error) {
+// withPool creates a database connection pool and passes it to the given function.
+// It handles pool creation, error handling, and cleanup automatically.
+func (c *DBCommands) withPool(ctx context.Context, fn func(*pgxpool.Pool) (engine.Result, error)) (engine.Result, error) {
 	pool, err := db.NewPool(ctx, c.databaseURL)
 	if err != nil {
 		return engine.ErrorResult(err), err
 	}
 	defer pool.Close()
+	return fn(pool)
+}
 
-	if err := db.RunMigrations(ctx, pool); err != nil {
-		return engine.ErrorResult(err), err
-	}
-
-	return engine.NewResult("Migrations applied successfully"), nil
+func (c *DBCommands) migrate(ctx context.Context, params map[string]any) (engine.Result, error) {
+	return c.withPool(ctx, func(pool *pgxpool.Pool) (engine.Result, error) {
+		if err := db.RunMigrations(ctx, pool); err != nil {
+			return engine.ErrorResult(err), err
+		}
+		return engine.NewResult("Migrations applied successfully"), nil
+	})
 }
 
 func (c *DBCommands) ping(ctx context.Context, params map[string]any) (engine.Result, error) {
-	pool, err := db.NewPool(ctx, c.databaseURL)
-	if err != nil {
-		return engine.ErrorResult(err), err
-	}
-	defer pool.Close()
-
-	if err := db.Ping(ctx, pool); err != nil {
-		return engine.ErrorResult(err), err
-	}
-
-	return engine.NewResult("Database connection successful"), nil
+	return c.withPool(ctx, func(pool *pgxpool.Pool) (engine.Result, error) {
+		if err := db.Ping(ctx, pool); err != nil {
+			return engine.ErrorResult(err), err
+		}
+		return engine.NewResult("Database connection successful"), nil
+	})
 }
 
 func (c *DBCommands) query(ctx context.Context, params map[string]any) (engine.Result, error) {
@@ -113,56 +114,47 @@ func (c *DBCommands) query(ctx context.Context, params map[string]any) (engine.R
 		return engine.ErrorResult(err), err
 	}
 
-	pool, err := db.NewPool(ctx, c.databaseURL)
-	if err != nil {
-		return engine.ErrorResult(err), err
-	}
-	defer pool.Close()
-
-	result, err := executeQuery(ctx, pool, sql)
-	if err != nil {
-		return engine.ErrorResult(err), err
-	}
-
-	return engine.NewResultWithData("Query executed", result), nil
+	return c.withPool(ctx, func(pool *pgxpool.Pool) (engine.Result, error) {
+		result, err := executeQuery(ctx, pool, sql)
+		if err != nil {
+			return engine.ErrorResult(err), err
+		}
+		return engine.NewResultWithData("Query executed", result), nil
+	})
 }
 
 func (c *DBCommands) shell(ctx context.Context, params map[string]any) (engine.Result, error) {
-	pool, err := db.NewPool(ctx, c.databaseURL)
-	if err != nil {
-		return engine.ErrorResult(err), err
-	}
-	defer pool.Close()
+	return c.withPool(ctx, func(pool *pgxpool.Pool) (engine.Result, error) {
+		fmt.Println("Connected to database. Type SQL queries, or 'exit' to quit.")
+		fmt.Println("-----------------------------------------------------------")
 
-	fmt.Println("Connected to database. Type SQL queries, or 'exit' to quit.")
-	fmt.Println("-----------------------------------------------------------")
+		reader := bufio.NewReader(os.Stdin)
+		for {
+			fmt.Print("sql> ")
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				break
+			}
 
-	reader := bufio.NewReader(os.Stdin)
-	for {
-		fmt.Print("sql> ")
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			break
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			if strings.ToLower(line) == "exit" || strings.ToLower(line) == "quit" || strings.ToLower(line) == "\\q" {
+				break
+			}
+
+			result, err := executeQuery(ctx, pool, line)
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+				continue
+			}
+
+			printQueryResult(result)
 		}
 
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		if strings.ToLower(line) == "exit" || strings.ToLower(line) == "quit" || strings.ToLower(line) == "\\q" {
-			break
-		}
-
-		result, err := executeQuery(ctx, pool, line)
-		if err != nil {
-			fmt.Printf("Error: %v\n", err)
-			continue
-		}
-
-		printQueryResult(result)
-	}
-
-	return engine.NewResult("Shell session ended"), nil
+		return engine.NewResult("Shell session ended"), nil
+	})
 }
 
 // QueryResult holds the result of a SQL query.
