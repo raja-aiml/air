@@ -1,0 +1,168 @@
+# Makefile.include - Reusable make targets for AI Runtime
+# Include this in your project Makefile: include ai-runtime/Makefile.include
+
+.PHONY: help
+help: ## Show this help message
+	@echo 'Usage: make [target]'
+	@echo ''
+	@echo 'Available targets:'
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+##@ Infrastructure Management
+
+.PHONY: infra-up
+infra-up: ## Start infrastructure services (postgres, observability stack)
+	@echo "Starting infrastructure services..."
+	@cd ai-runtime/config/docker && docker compose up -d
+
+.PHONY: infra-down
+infra-down: ## Stop infrastructure services
+	@echo "Stopping infrastructure services..."
+	@cd ai-runtime/config/docker && docker compose down
+
+.PHONY: infra-restart
+infra-restart: infra-down infra-up ## Restart infrastructure services
+
+.PHONY: infra-logs
+infra-logs: ## Show infrastructure logs
+	@cd ai-runtime/config/docker && docker compose logs -f
+
+.PHONY: infra-ps
+infra-ps: ## List running infrastructure services
+	@cd ai-runtime/config/docker && docker compose ps
+
+.PHONY: infra-clean
+infra-clean: ## Remove infrastructure volumes and networks
+	@echo "Cleaning infrastructure..."
+	@cd ai-runtime/config/docker && docker compose down -v
+
+##@ Database Operations
+
+.PHONY: db-migrate
+db-migrate: ## Run database migrations
+	@echo "Running database migrations..."
+	@psql $(DATABASE_URL) -f ai-runtime/config/database/migrations/001_init.sql
+
+.PHONY: db-seed
+db-seed: ## Seed database with sample data
+	@echo "Seeding database..."
+	@psql $(DATABASE_URL) -f ai-runtime/config/database/seeds/sample_questions.sql
+
+.PHONY: db-reset
+db-reset: infra-down ## Reset database (WARNING: destructive)
+	@echo "Resetting database..."
+	@cd ai-runtime/config/docker && docker compose down -v
+	@cd ai-runtime/config/docker && docker compose up -d postgres
+	@sleep 5
+	@$(MAKE) db-migrate
+	@$(MAKE) db-seed
+
+.PHONY: db-shell
+db-shell: ## Open PostgreSQL shell
+	@psql $(DATABASE_URL)
+
+##@ Observability
+
+.PHONY: obs-verify
+obs-verify: ## Verify observability stack health
+	@echo "Verifying observability stack..."
+	@go run ai-runtime/cmd/verify/main.go
+
+.PHONY: obs-jaeger
+obs-jaeger: ## Open Jaeger UI
+	@open http://localhost:16686
+
+.PHONY: obs-prometheus
+obs-prometheus: ## Open Prometheus UI
+	@open http://localhost:9090
+
+.PHONY: obs-grafana
+obs-grafana: ## Open Grafana UI
+	@open http://localhost:3000
+
+##@ Development
+
+.PHONY: dev-up
+dev-up: infra-up ## Start development environment
+	@echo "Development environment ready"
+	@echo "Database: $(DATABASE_URL)"
+	@echo "Jaeger: http://localhost:16686"
+	@echo "Prometheus: http://localhost:9090"
+
+.PHONY: dev-down
+dev-down: infra-down ## Stop development environment
+
+##@ Testing
+
+.PHONY: test-unit
+test-unit: ## Run unit tests
+	@echo "Running unit tests..."
+	@go test -v -race -short ./...
+
+.PHONY: test-integration
+test-integration: ## Run integration tests with testcontainers
+	@echo "Running integration tests..."
+	@go test -v -race -run Integration ./...
+
+.PHONY: test-all
+test-all: test-unit test-integration ## Run all tests
+
+.PHONY: test-coverage
+test-coverage: ## Run tests with coverage
+	@echo "Running tests with coverage..."
+	@go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+	@go tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report: coverage.html"
+
+##@ CI/CD Workflows
+
+.PHONY: ci-lint
+ci-lint: ## Run linters
+	@echo "Running linters..."
+	@golangci-lint run ./...
+
+.PHONY: ci-format
+ci-format: ## Format code
+	@echo "Formatting code..."
+	@gofmt -s -w .
+	@goimports -w .
+
+.PHONY: ci-vet
+ci-vet: ## Run go vet
+	@echo "Running go vet..."
+	@go vet ./...
+
+.PHONY: ci-check
+ci-check: ci-format ci-vet ci-lint test-all ## Run all CI checks
+
+.PHONY: ci-build
+ci-build: ## Build all binaries
+	@echo "Building binaries..."
+	@go build -o bin/server ./cmd/server
+	@go build -o bin/dev ./cmd/dev
+	@go build -o bin/verify ./cmd/verify
+
+##@ Utilities
+
+.PHONY: clean
+clean: ## Clean build artifacts and logs
+	@echo "Cleaning..."
+	@rm -rf bin/
+	@rm -rf logs/
+	@rm -f coverage.out coverage.html
+
+.PHONY: deps
+deps: ## Download dependencies
+	@echo "Downloading dependencies..."
+	@go mod download
+	@go mod tidy
+
+.PHONY: tools
+tools: ## Install development tools
+	@echo "Installing tools..."
+	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	@go install golang.org/x/tools/cmd/goimports@latest
+
+##@ Variables
+# These can be overridden in your project Makefile
+DATABASE_URL ?= postgres://postgres:postgres@localhost:5432/skillflow?sslmode=disable

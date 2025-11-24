@@ -1,0 +1,119 @@
+version: 2
+
+project_name: air
+
+before:
+  hooks:
+    - go mod tidy
+    - go mod download
+
+builds:
+  - id: air-dev
+    main: ./cmd/dev
+    binary: air-dev
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+  - id: air-verify
+    main: ./cmd/verify
+    binary: air-verify
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+      - config/**/*
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: raja-aiml
+    name: air
+  prerelease: auto
+  name_template: "{{.ProjectName}} v{{.Version}}"
+  footer: |
+    ## Installation
+    
+    ### Using Go
+    ```bash
+    go install github.com/raja-aiml/air/cmd/air-dev@{{.Tag}}
+    go install github.com/raja-aiml/air/cmd/air-verify@{{.Tag}}
+    ```
+    
+    ### Using Homebrew (macOS/Linux)
+    ```bash
+    brew tap raja-aiml/tap
+    brew install air
+    ```
+    
+    ### Binary Downloads
+    Download the appropriate archive for your platform from the assets below.
+    
+    ---
+    
+    **Full Changelog**: https://github.com/raja-aiml/air/compare/{{.PreviousTag}}...{{.Tag}}
+
+brews:
+  - repository:
+      owner: raja-aiml
+      name: homebrew-tap
+    directory: Formula
+    homepage: https://github.com/raja-aiml/air
+    description: "AI Runtime Infrastructure - Build production-ready AI agents and MCP servers in Go"
+    license: MIT
+    install: |
+      bin.install "air-dev"
+      bin.install "air-verify"
+    test: |
+      system "#{bin}/air-dev", "--version"

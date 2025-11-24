@@ -1,0 +1,113 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # Receive logs from Fluent Bit via Fluent Forward protocol
+  fluentforward:
+    endpoint: 0.0.0.0:24224
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1
+
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+
+  # Filter logs: only keep ERROR and WARNING severity (backup filter if Fluent Bit filter fails)
+  filter/logs:
+    error_mode: ignore
+    logs:
+      log_record:
+        # Drop logs with severity < WARN (13)
+        # SeverityNumber: TRACE=1-4, DEBUG=5-8, INFO=9-12, WARN=13-16, ERROR=17-20, FATAL=21-24
+        - 'severity_number < 13'
+
+  # Transform logs to set proper service.name for Jaeger filtering
+  transform/logs:
+    error_mode: ignore
+    log_statements:
+      - context: resource
+        statements:
+          # Map container_name to service.name if service.name not set
+          - set(attributes["service.name"], attributes["container_name"]) where attributes["service.name"] == nil and attributes["container_name"] != nil
+          # Use source as fallback service name
+          - set(attributes["service.name"], "unknown-service") where attributes["service.name"] == nil
+
+      - context: log
+        statements:
+          # Set operation name based on severity for easier filtering in Jaeger
+          - set(attributes["operation"], Concat(["log.", attributes["severity_text"]], "")) where attributes["severity_text"] != nil
+          - set(attributes["operation"], "log.unknown") where attributes["operation"] == nil
+          # Ensure log body is set
+          - set(body, attributes["log"]) where body == nil and attributes["log"] != nil
+
+  # Transform traces to ensure proper service naming
+  transform/traces:
+    error_mode: ignore
+    trace_statements:
+      - context: resource
+        statements:
+          - set(attributes["service.name"], "skillflow-backend") where attributes["service.name"] == nil
+
+  # Add environment attribute to all telemetry
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: development
+        action: upsert
+
+  # Attributes processor to add Jaeger-specific tags
+  attributes/jaeger:
+    actions:
+      - key: jaeger.service
+        from_attribute: service.name
+        action: upsert
+      - key: jaeger.operation
+        from_attribute: operation
+        action: upsert
+
+exporters:
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: skillflow
+
+  debug:
+    verbosity: detailed
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  pprof:
+    endpoint: 0.0.0.0:1777
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [health_check, pprof, zpages]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, transform/traces, resource, batch]
+      exporters: [otlp/jaeger, debug]
+
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [prometheus, debug]
+
+    # Logs pipeline: receive from Fluent Bit & OTLP, filter error/warn, send to Jaeger
+    logs:
+      receivers: [otlp, fluentforward]
+      processors: [memory_limiter, transform/logs, filter/logs, attributes/jaeger, resource, batch]
+      exporters: [otlp/jaeger, debug]
