@@ -39,7 +39,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&flagComposeFile, "compose-file", os.Getenv("AIR_COMPOSE_FILE"), "Path to docker-compose.yml")
 
 	// add subcommands
-	rootCmd.AddCommand(devCmd)
+	rootCmd.AddCommand(stackCmd)
 	rootCmd.AddCommand(verifyCmd)
 	rootCmd.AddCommand(publishCmd)
 	rootCmd.AddCommand(serveCmd)
