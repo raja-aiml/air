@@ -10,8 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/raja-aiml/air/internal/testinfra/containers"
-	"github.com/raja-aiml/air/internal/testinfra/tests"
+	pkg "github.com/raja-aiml/air/pkg"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
@@ -104,10 +103,10 @@ func main() {
 	defer cancel()
 
 	// Create logger that implements TestingT for command-line output
-	logger := tests.NewManualTester(true)
+	logger := pkg.NewManualTester(true)
 
 	// Create default config - loads everything from docker-compose.yml
-	cfg := containers.DefaultConfig()
+	cfg := pkg.DefaultTestConfig()
 	cfg.ServiceName = cfg.OTELServiceName // Match OTEL service name for Jaeger queries
 
 	// Phase 1: Start infrastructure using StartWithCompose (all config from docker-compose.yml)
@@ -116,25 +115,25 @@ func main() {
 	fmt.Println(strings.Repeat("─", 60))
 	phaseStart := time.Now()
 
-	infra, err := containers.StartWithCompose(ctx, cfg)
+	infra, err := pkg.StartWithCompose(ctx, cfg)
 	if err != nil {
 		fmt.Printf("❌ Failed to start infrastructure: %v\n", err)
 		os.Exit(1)
 	}
-	defer containers.CleanupInfrastructure(infra)
+	defer pkg.CleanupInfrastructure(infra)
 
 	fmt.Printf("  ✓ Postgres, Jaeger, Prometheus, OTEL Collector (%v)\n", time.Since(phaseStart).Round(10*time.Millisecond))
 
 	// Wait for services to be actually ready (not just running)
-	if err := containers.WaitForPostgres(ctx, infra.PostgresURL); err != nil {
+	if err := pkg.WaitForPostgres(ctx, infra.PostgresURL); err != nil {
 		fmt.Printf("❌ PostgreSQL not ready: %v\n", err)
 		os.Exit(1)
 	}
-	if err := containers.WaitForJaeger(ctx, infra.JaegerURL); err != nil {
+	if err := pkg.WaitForJaeger(ctx, infra.JaegerURL); err != nil {
 		fmt.Printf("❌ Jaeger not ready: %v\n", err)
 		os.Exit(1)
 	}
-	if err := containers.WaitForPrometheus(ctx, infra.PrometheusURL); err != nil {
+	if err := pkg.WaitForPrometheus(ctx, infra.PrometheusURL); err != nil {
 		fmt.Printf("❌ Prometheus not ready: %v\n", err)
 		os.Exit(1)
 	}
@@ -144,8 +143,8 @@ func main() {
 	fmt.Println("▶ Health Checks")
 	fmt.Println(strings.Repeat("─", 60))
 	phaseStart = time.Now()
-	report := containers.NewReport(false) // Verbose mode
-	if err := containers.VerifyContainerHealth(ctx, infra, report); err != nil {
+	report := pkg.NewReport(false) // Verbose mode
+	if err := pkg.VerifyContainerHealth(ctx, infra, report); err != nil {
 		fmt.Printf("❌ Container health checks failed: %v\n", err)
 		fmt.Printf("   ℹ️ Check logs: docker logs skill-flow-<service>\n")
 		os.Exit(1)
@@ -161,7 +160,7 @@ func main() {
 	defer cancelServer()
 
 	serverReady := make(chan struct{})
-	if err := containers.StartServerInBackground(serverCtx, cfg, infra, serverReady); err != nil {
+	if err := pkg.StartServerInBackground(serverCtx, cfg, infra, serverReady); err != nil {
 		fmt.Printf("❌ Failed to start server: %v\n", err)
 		fmt.Printf("   ℹ️ Check: lsof -ti:8080 (port may be in use)\n")
 		os.Exit(1)
@@ -207,13 +206,13 @@ func main() {
 	fmt.Println()
 
 	fmt.Println("\n  Testing:")
-	if err := tests.VerifyTracesPropagation(logger, ctx, cfg, infra); err != nil {
+	if err := pkg.VerifyTracesPropagation(logger, ctx, cfg, infra); err != nil {
 		fmt.Printf("  ❌ Traces verification failed: %v\n", err)
 		fmt.Printf("     ℹ️ Check Jaeger UI: %s\n", infra.JaegerURL)
 		os.Exit(1)
 	}
 
-	if err := tests.VerifyMetricsCollection(logger, ctx, cfg, infra); err != nil {
+	if err := pkg.VerifyMetricsCollection(logger, ctx, cfg, infra); err != nil {
 		fmt.Printf("  ❌ Metrics verification failed: %v\n", err)
 		fmt.Printf("     ℹ️ Check Prometheus UI: %s\n", infra.PrometheusURL)
 		os.Exit(1)

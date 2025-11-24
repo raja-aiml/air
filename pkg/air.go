@@ -11,15 +11,22 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/raja-aiml/air/internal/commands"
+	"github.com/raja-aiml/air/internal/engine"
 	"github.com/raja-aiml/air/internal/foundation/auth"
 	"github.com/raja-aiml/air/internal/foundation/compose"
 	"github.com/raja-aiml/air/internal/foundation/config"
 	db "github.com/raja-aiml/air/internal/foundation/database"
 	"github.com/raja-aiml/air/internal/foundation/errors"
+	ghpub "github.com/raja-aiml/air/internal/foundation/github"
+	"github.com/raja-aiml/air/internal/foundation/httpclient"
 	"github.com/raja-aiml/air/internal/foundation/logging"
 	"github.com/raja-aiml/air/internal/foundation/observability/metrics"
 	telemetry "github.com/raja-aiml/air/internal/foundation/observability/tracing"
+	"github.com/raja-aiml/air/internal/mcp"
+	"github.com/raja-aiml/air/internal/nlp"
 	"github.com/raja-aiml/air/internal/testinfra/containers"
+	"github.com/raja-aiml/air/internal/testinfra/tests"
 	"github.com/raja-aiml/air/internal/testinfra/verification"
 )
 
@@ -37,6 +44,17 @@ type (
 func NewComposeService(cfg ComposeConfig) (*ComposeService, error) {
 	return compose.New(cfg)
 }
+
+// ============================================================================
+// HTTP - HTTP Client Utilities
+// ============================================================================
+
+type HTTPClient = httpclient.Client
+
+var (
+	NewHTTPClient     = httpclient.New
+	DefaultHTTPClient = httpclient.Default
+)
 
 // ============================================================================
 // CONFIG - Configuration Loading
@@ -171,6 +189,83 @@ func NewDBTracer() *DBTracer {
 	return telemetry.NewDBTracer()
 }
 
+// ============================================================================
+// ENGINE - Command registry and command types (re-exported from internal/engine)
+// ============================================================================
+
+type (
+	Registry  = engine.Registry
+	Command   = engine.Command
+	Result    = engine.Result
+	Params    = engine.Params
+	Parameter = engine.Parameter
+)
+
+var (
+	NewRegistry = engine.NewRegistry
+)
+
+// ============================================================================
+// COMMANDS - Command groups builders (re-exported from internal/commands)
+// ============================================================================
+
+type (
+	InfraCommands = commands.InfraCommands
+	DBCommands    = commands.DBCommands
+)
+
+var (
+	NewInfraCommands = commands.NewInfraCommands
+	NewDBCommands    = commands.NewDBCommands
+	NewObsCommands   = commands.NewObsCommands
+	NewLintCommands  = commands.NewLintCommands
+)
+
+// ============================================================================
+// MCP - MCP server wrapper (re-exported)
+// ============================================================================
+
+type (
+	MCPServer = mcp.Server
+	MCPConfig = mcp.Config
+)
+
+var (
+	NewMCPServer     = mcp.NewServer
+	DefaultMCPConfig = mcp.DefaultConfig
+)
+
+// ============================================================================
+// NLP - Parser (re-exported)
+// ============================================================================
+
+type (
+	Parser       = nlp.Parser
+	ParserConfig = nlp.ParserConfig
+)
+
+var (
+	NewParser           = nlp.NewParser
+	DefaultParserConfig = nlp.DefaultParserConfig
+)
+
+// ============================================================================
+// TESTS - testinfra helpers
+// ============================================================================
+
+type (
+	TestingT = tests.TestingT
+)
+
+var (
+	NewManualTester = tests.NewManualTester
+)
+
+var (
+	VerifyTracesPropagation = tests.VerifyTracesPropagation
+	VerifyMetricsCollection = tests.VerifyMetricsCollection
+)
+
 func StartSpan(ctx context.Context, name string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
 	return telemetry.Tracer().Start(ctx, name, opts...)
 }
@@ -218,9 +313,11 @@ var (
 	DefaultTestConfig         = containers.DefaultConfig
 	StartWithCompose          = containers.StartWithCompose
 	StartInfrastructure       = containers.StartInfrastructure
+	StartServerInBackground   = containers.StartServerInBackground
 	VerifyContainerHealth     = containers.VerifyContainerHealth
 	StartApplicationServer    = containers.StartApplicationServer
 	CleanupInfrastructure     = containers.CleanupInfrastructure
+	NewReport                 = containers.NewReport
 	WaitForPostgres           = containers.WaitForPostgres
 	WaitForJaeger             = containers.WaitForJaeger
 	WaitForPrometheus         = containers.WaitForPrometheus
@@ -290,3 +387,19 @@ func VerifyObservabilityJSON(ctx context.Context) error {
 	cfg := DefaultTestConfig()
 	return RunVerification(ctx, cfg, true)
 }
+
+// ============================================================================
+// GITHUB - Repository Publishing
+// ============================================================================
+
+type (
+	GitHubPublisher  = ghpub.Publisher
+	RepositoryConfig = ghpub.RepositoryConfig
+	ReleaseConfig    = ghpub.ReleaseConfig
+	PublishOptions   = ghpub.PublishOptions
+)
+
+var (
+	NewGitHubPublisher = ghpub.NewPublisher
+	PublishToGitHub    = ghpub.Publish
+)

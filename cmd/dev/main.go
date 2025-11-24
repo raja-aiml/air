@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/raja-aiml/air/internal/foundation/compose"
+	pkg "github.com/raja-aiml/air/pkg"
 )
 
 func main() {
@@ -67,7 +67,7 @@ func runUp(detach bool) {
 	fmt.Println(strings.Repeat("═", 60))
 
 	// Create compose service
-	svc, err := compose.New(compose.Config{
+	svc, err := pkg.NewComposeService(pkg.ComposeConfig{
 		ComposeFilePath: "config/docker/docker-compose.yml",
 		ProjectName:     "skillflow",
 		Env:             make(map[string]string),
@@ -161,7 +161,7 @@ func runDown() {
 	fmt.Println("  🛑 STOPPING SERVICES")
 	fmt.Println(strings.Repeat("═", 60))
 
-	svc, err := compose.New(compose.Config{
+	svc, err := pkg.NewComposeService(pkg.ComposeConfig{
 		ComposeFilePath: "config/docker/docker-compose.yml",
 		ProjectName:     "skillflow",
 		Env:             make(map[string]string),
@@ -202,7 +202,7 @@ func runStatus() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	svc, err := compose.New(compose.Config{
+	svc, err := pkg.NewComposeService(pkg.ComposeConfig{
 		ComposeFilePath: "config/docker/docker-compose.yml",
 		ProjectName:     "skillflow",
 		Env:             make(map[string]string),
@@ -253,7 +253,7 @@ func runLogs(serviceName string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	svc, err := compose.New(compose.Config{
+	svc, err := pkg.NewComposeService(pkg.ComposeConfig{
 		ComposeFilePath: "config/docker/docker-compose.yml",
 		ProjectName:     "skillflow",
 		Env:             make(map[string]string),

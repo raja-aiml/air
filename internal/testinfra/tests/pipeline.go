@@ -1,10 +1,10 @@
 package tests
 
 import (
-	"github.com/raja-aiml/air/internal/testinfra/containers"
-	"github.com/raja-aiml/air/internal/testinfra/verification"
 	"context"
 	"fmt"
+	"github.com/raja-aiml/air/internal/testinfra/containers"
+	"github.com/raja-aiml/air/internal/testinfra/verification"
 )
 
 // VerifyTracesPropagation generates traffic and verifies traces reach Jaeger

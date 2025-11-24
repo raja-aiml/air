@@ -1,11 +1,11 @@
 package verification
 
 import (
-	"github.com/raja-aiml/air/internal/testinfra/containers"
 	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"github.com/raja-aiml/air/internal/testinfra/containers"
 	"net/http"
 	"net/url"
 	"time"
