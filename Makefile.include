@@ -1,5 +1,14 @@
 # Makefile.include - Reusable make targets for AI Runtime
 # Include this in your project Makefile: include ai-runtime/Makefile.include
+#
+# ⚠️  DEPRECATION NOTICE:
+# This Makefile is provided for backward compatibility only.
+# Please use the `air` CLI instead for better experience:
+#   - air dev up       (instead of make dev-up)
+#   - air dev status   (instead of make infra-ps)
+#   - air verify       (instead of make obs-verify)
+#
+# See QUICKSTART.md for full CLI documentation.
 
 .PHONY: help
 help: ## Show this help message
