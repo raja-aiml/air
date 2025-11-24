@@ -242,7 +242,7 @@ func main() {
 ✅ Clean separation: infrastructure (ai-runtime) vs domain (skill-flow)
 ✅ Production-ready with comprehensive observability
 ✅ Testable with full integration test infrastructure
-✅ Documented with README and Makefile.include
+✅ Documented with README and CLI commands
 
 ## Success Metrics
 

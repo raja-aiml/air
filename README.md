@@ -142,14 +142,12 @@ git clone https://github.com/raja-aiml/air.git
 
 ### Project Setup
 
-**Option 1: Include Makefile Targets**
+**Option 1: Use the CLI**
 
-```makefile
-# Makefile
-include air/Makefile.include
-
-# Override defaults if needed
-DATABASE_URL = postgres://user:pass@localhost:5432/mydb?sslmode=disable
+```bash
+# Quick start with CLI
+air dev up
+air verify
 ```
 
 **Option 2: Use Go Package Directly for AI Agents**
@@ -276,8 +274,6 @@ air/
 │       ├── otel-collector-config.yaml
 │       ├── prometheus-config.yaml
 │       └── fluent-bit.conf
-│
-└── Makefile.include       # Reusable targets
 ```
 
 ---
@@ -495,7 +491,6 @@ fmt.Printf("Avg response time: %v\n", stats.AvgDuration)
 
 ### Optional Tools
 
-- `make` - For using Makefile targets
 - `psql` - For database operations
 - `golangci-lint` - For linting
 
